@@ -1,4 +1,4 @@
-module.exports = function() {
+module.exports = function(GET_CONFIG_DELAY_MS, BLINK_LOOP_DELAY_MS, WAIT_IF_NO_RGB_DELAY_MS) {
 
     const Cylon = require('cylon');
     const Promise = require('bluebird');
@@ -32,57 +32,96 @@ module.exports = function() {
     };
 
     const switchColor = function(on, colorLetter, robot) {
+
         const devicePrefix = 'pin' + colorLetter.toUpperCase();
+
         for (var key in robot) {
             if (key.indexOf(devicePrefix) > -1) {
-                console.log(key);
                 robot[key].digitalWrite(on ? 1 : 0);
             }
         }
     };
 
     const delay = function(time) {
+
         return new Promise(function(fulfill) {
             setTimeout(fulfill, time);
         });
     };
 
-    const initializeRobotWorker = function(configurationPromise, onButtonClick) {
-        return function(robot) {
+    const startInfiniteRgbSequenceBlinking = function(robot, getRgbSequenceFn) {
 
-            var rgbSequence = [];
+        const immutableRgbSequence = [].concat(getRgbSequenceFn());
 
-            // Adding button click handler
-            robot.button.on('push', function() {
-                onButtonClick();
-            });
+        // If there's no configuration, wait a little before trying again
+        if (immutableRgbSequence.length === 0) {
+            
+            delay(WAIT_IF_NO_RGB_DELAY_MS)
+                .done(function() {
+                    console.log('Waiting for RGB sequence...');
+                    startInfiniteRgbSequenceBlinking(robot, getRgbSequenceFn); 
+                });
 
-            // Initiating infinite rgb sequence receiving
-            const startInfiniteConfigurationRetrieval = function() {
-                configurationPromise()
-                    .then(function(configuration) {
-                        rgbSequence = configuration;
-                        startInfiniteConfigurationRetrieval();
-                    });
-            };
+        } else {
 
-            startInfiniteConfigurationRetrieval();
+            console.log('STARTED Blinking:', immutableRgbSequence);
 
-            // Initiate infinite RGB blinking
-            const startInfiniteRgbSequenceBlinking = function() {
+            var currentRgbSequenceId = 0;
+            var ledsOn = false;
 
-                const immutableRgbSequence = [].concat(rgbSequence);
-
-                // If there's no configuration, wait a little before trying again
-                if (immutableRgbSequence.length === 0) {
-                    delay(2 * 1000).done(startInfiniteRgbSequenceBlinking);
+            const processBlinking = function() {
+                if (currentRgbSequenceId == immutableRgbSequence.length) {
+                    console.log('STOPPED Blinking:', immutableRgbSequence);
+                    startInfiniteRgbSequenceBlinking(robot, getRgbSequenceFn);
                     return;
                 }
+                
+                const currentColor = immutableRgbSequence[currentRgbSequenceId];
 
-                // TODO: blinking
+                if (ledsOn) {
+                    currentRgbSequenceId++;
+                    switchColor(false, currentColor, robot);
+                    ledsOn = false;
+
+                } else {
+                    switchColor(true, currentColor, robot)
+                    ledsOn = true;
+                }
+
+                delay(BLINK_LOOP_DELAY_MS).done(processBlinking);
             };
 
-            startInfiniteRgbSequenceBlinking();
+            processBlinking();
+        }
+    };
+    
+    const startInfiniteConfigurationRetrieval = function(robot, configurationPromise, setRgbSequenceFn) {
+        
+        configurationPromise()
+            .then(function(configuration) {
+                setRgbSequenceFn(configuration);
+                delay(GET_CONFIG_DELAY_MS)
+                    .done(function() {
+                        startInfiniteConfigurationRetrieval(robot, configurationPromise, setRgbSequenceFn)
+                    });
+            });
+    };
+
+    const initializeRobotWorker = function(configurationPromise, onButtonClick) {
+        
+        return function(robot) {
+
+            robot.button.on('push', onButtonClick);
+
+            var rgbSequence = [];
+            
+            startInfiniteConfigurationRetrieval(robot, configurationPromise, function(newRgbSequence) {
+                rgbSequence = newRgbSequence;
+            });
+
+            startInfiniteRgbSequenceBlinking(robot, function() {
+                return rgbSequence;
+            });
         };
     };
 

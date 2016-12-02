@@ -1,7 +1,8 @@
 module.exports = function(DEVICE_KEY, EC2_URL, HEROKU_URL) {
 
     const Fetch = require('node-fetch');
-    Fetch.Promise = require('bluebird');
+    const Promise = require('bluebird');
+    Fetch.Promise = Promise
 
     const getUrlBy = function(source) {
         switch(source) {
@@ -19,6 +20,10 @@ module.exports = function(DEVICE_KEY, EC2_URL, HEROKU_URL) {
 
     return {
         getConfiguration: function(source) {
+            if (!source) {
+                return Promise.resolve([]);
+            }
+
             return Fetch(getUrlBy(source))
                 .then(function(response) {
                     return response.json();
